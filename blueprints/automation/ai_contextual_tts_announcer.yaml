@@ -1,0 +1,205 @@
+# ============================================================
+# AI Contextual TTS Announcer (HomePod Safe)
+# ============================================================
+# Watches a trigger entity for an 'on' state, generates a
+# custom AI-written message, and plays it via TTS on a media
+# player — with full volume ducking and queue restoration.
+#
+# Designed to be safe for HomePods, which are sensitive to
+# abrupt media changes. It snapshots the speaker state,
+# pauses playback, delivers the announcement, then restores
+# everything automatically.
+#
+# Requirements:
+#   - Home Assistant 2024.6+ (ai_task domain support)
+#   - An AI Task integration (e.g. OpenAI, Google Generative AI,
+#     Nvidia NIM, etc.) configured in HA
+#   - A TTS integration (e.g. ElevenLabs, Piper, Google Cloud TTS)
+#   - A media_player entity (HomePod, Sonos, Chromecast, etc.)
+# ============================================================
+
+blueprint:
+  name: AI Contextual TTS Announcer (HomePod Safe)
+  description: >
+    Generates an AI-written message and plays it on a media player
+    with safe volume ducking and full queue restoration.
+    Perfect for HomePods and other picky speakers.
+  domain: automation
+
+  input:
+    # ── Trigger ──────────────────────────────────────────────
+    trigger_entity:
+      name: Trigger Entity
+      description: >
+        The entity that fires the announcement when it turns 'on'.
+        Works with binary sensors, switches, input_booleans, etc.
+      selector:
+        entity: {}
+
+    # ── Speaker ───────────────────────────────────────────────
+    target_speaker:
+      name: Target Speaker
+      description: The media_player entity to output the TTS announcement on.
+      selector:
+        entity:
+          domain: media_player
+
+    announcement_volume:
+      name: Announcement Volume
+      description: Volume level during TTS playback (0.0 – 1.0).
+      default: 0.75
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.05
+          mode: slider
+
+    # ── AI ────────────────────────────────────────────────────
+    ai_model:
+      name: AI Task Entity
+      description: >
+        The ai_task entity to use for text generation.
+        Found under Settings → Integrations → your AI provider.
+      selector:
+        entity:
+          domain: ai_task
+
+    ai_prompt:
+      name: AI Prompt
+      description: >
+        Instructions for the AI. Tell it what kind of message to write
+        and any relevant context. The output must be plain spoken text
+        with no quotes, markdown, or formatting — it goes straight to TTS.
+      default: "Write a short, friendly announcement. Output only the raw spoken text."
+      selector:
+        text:
+          multiline: true
+
+    # ── TTS ───────────────────────────────────────────────────
+    tts_service:
+      name: TTS Entity
+      description: >
+        The text-to-speech entity to convert the AI text into audio.
+        Found under Settings → Integrations → your TTS provider.
+      selector:
+        entity:
+          domain: tts
+
+# ── Trigger ───────────────────────────────────────────────────
+# Fires whenever the chosen entity transitions to the 'on' state.
+trigger:
+  - trigger: state
+    entity_id: !input trigger_entity
+    to: "on"
+
+# ── Actions ───────────────────────────────────────────────────
+actions:
+
+  # 1. Generate the announcement text via AI.
+  #    The response is stored in `generated_text`.
+  #    Access the output string via `generated_text.data`.
+  - action: ai_task.generate_data
+    data:
+      task_name: "blueprint generated announcement"
+      instructions: !input ai_prompt
+      entity_id: !input ai_model
+    response_variable: generated_text
+
+  # 2. Capture the current speaker state NOW (after the AI call),
+  #    so we have accurate values to restore later.
+  #    Doing this after the AI call (which can take 1-3 seconds)
+  #    ensures we don't restore a stale state.
+  - variables:
+      speaker_var: !input target_speaker
+      tts_var: !input tts_service
+      old_volume: "{{ state_attr(speaker_var, 'volume_level') | float(0.5) }}"
+      was_playing: "{{ is_state(speaker_var, 'playing') }}"
+
+  # 3. Snapshot the full media player state into a temporary scene.
+  #    This captures volume, source, media queue info, etc.
+  #    We'll restore from this snapshot after the announcement.
+  - action: scene.create
+    data:
+      scene_id: speaker_before_tts_snapshot
+      snapshot_entities:
+        - "{{ speaker_var }}"
+
+  # 4. If music was playing, pause it before the announcement.
+  #    A short delay gives the HomePod time to acknowledge the pause
+  #    before we change the volume.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ was_playing }}"
+        sequence:
+          - action: media_player.media_pause
+            target:
+              entity_id: "{{ speaker_var }}"
+          - delay:
+              seconds: 1
+
+  # 5. Duck the volume to the announcement level.
+  - action: media_player.volume_set
+    target:
+      entity_id: "{{ speaker_var }}"
+    data:
+      volume_level: !input announcement_volume
+
+  # 6. Play the AI-generated text via TTS.
+  #    The media-source URI tells HA to render the message
+  #    through the chosen TTS engine before sending to the speaker.
+  - action: media_player.play_media
+    target:
+      entity_id: "{{ speaker_var }}"
+    data:
+      media:
+        media_content_type: music
+        media_content_id: >-
+          media-source://tts/{{ tts_var }}?message={{ generated_text.data | urlencode }}
+
+  # 7. Wait for the speaker to actually start playing
+  #    (TTS rendering + network delivery can take a moment).
+  #    Timeout after 20s in case the TTS service is slow or unavailable.
+  - wait_template: "{{ is_state(speaker_var, 'playing') }}"
+    timeout: "00:00:20"
+
+  # 8. Wait for the announcement to finish playing.
+  #    Timeout after 30s as a safety valve for long messages.
+  - wait_template: "{{ not is_state(speaker_var, 'playing') }}"
+    timeout: "00:00:30"
+
+  # 9. Restore volume to what it was before the announcement.
+  #    Done explicitly first so volume change is immediate,
+  #    before the full scene restore kicks in.
+  - action: media_player.volume_set
+    target:
+      entity_id: "{{ speaker_var }}"
+    data:
+      volume_level: "{{ old_volume }}"
+
+  # 10. Restore the full speaker state from the snapshot.
+  #     This re-applies source, queue position, and other attributes.
+  - action: scene.turn_on
+    target:
+      entity_id: scene.speaker_before_tts_snapshot
+
+  # 11. If music was playing before the announcement, resume it.
+  #     The 2s delay gives the scene restore time to settle —
+  #     especially important for HomePods which can be slow to
+  #     re-establish an AirPlay session.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ was_playing }}"
+        sequence:
+          - delay:
+              seconds: 2
+          - action: media_player.media_play
+            target:
+              entity_id: "{{ speaker_var }}"
+
+# Only allow one instance of this automation to run at a time.
+# If the trigger fires again during an announcement, it is ignored.
+# Change to 'queued' if you want announcements to line up instead.
+mode: single
