@@ -82,3 +82,41 @@ Only one instance of the automation runs at a time. If the trigger fires again m
 - End your prompt with: *"Output ONLY the raw spoken text. No quotes, no formatting."*
 - Keep expected output under ~200 words to stay within TTS comfort zones.
 - You can inject sensor values into the prompt using a template in the automation that calls this blueprint.
+
+---
+
+### Power Monitor - Espresso Ready
+
+Waits for power consumption to be at or above a threshold (default 10W) for a sustained duration (default 10 minutes), then flips an `input_boolean` on. Turns it off immediately when power drops below the threshold.
+
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fluxus%2Fhome-assistant-goodies%2Fmain%2Fblueprints%2Fautomation%2Fpower_monitor_espresso_ready.yaml)
+
+#### What it does
+
+1. Watches a power sensor for crossing above the threshold
+2. Waits the configured duration (10 min by default)
+3. Re-checks power is still above threshold after the wait
+4. Turns ON `input_boolean.espresso_ready`
+5. Turns OFF `input_boolean.espresso_ready` the moment power drops below threshold
+
+#### Requirements
+
+| Requirement | Notes |
+|---|---|
+| A power sensor | Any entity exposing power in watts (e.g. `sensor.smart_plug_v2_89b92a_power`) |
+| An `input_boolean` helper | Create one in HA: Settings → Devices & Services → Helpers → Toggle |
+
+#### Example: Espresso Machine Ready
+
+Power plug: `sensor.smart_plug_v2_89b92a_power`
+Threshold: 10W, Duration: 10 minutes
+
+Once the machine draws 10W+ continuously for 10 minutes, `input_boolean.espresso_ready` turns ON — use it as a trigger in the AI TTS announcer to fire the espresso roast.
+
+#### Notes
+
+**Cancellation on drop**
+If power dips below 10W during the 10-minute wait, the timer is naturally abandoned. When power crosses above again, a fresh 10-minute wait starts.
+
+**`mode: single`**
+Only one instance runs at a time. If power oscillates rapidly above/below the threshold, overlapping triggers are ignored.

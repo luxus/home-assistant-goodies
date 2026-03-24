@@ -1,0 +1,40 @@
+alias: Power Monitor - Espresso Ready
+description: >
+  Turns on an input_boolean after power has been continuously at or above 10W
+  for 10 minutes. Turns it off when power drops below 10W.
+triggers:
+  - trigger: state
+    entity_id: sensor.smart_plug_v2_89b92a_power
+    # Fires on every power state change
+conditions: []
+actions:
+  - choose:
+      # ── Case 1: Power just crossed ABOVE 10W ────────────────
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.to_state.state | float(0) >= 10 }}
+        sequence:
+          # Start the 10-minute wait. If power drops below 10W during
+          # this window, the restart automation (Case 2) handles it.
+          - delay:
+              minutes: 10
+          # After waiting, re-check that power is still >= 10W.
+          # If it dropped during the delay, do nothing.
+          - condition: template
+            value_template: >
+              {{ states('sensor.smart_plug_v2_89b92a_power') | float(0) >= 10 }}
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.espresso_ready
+
+      # ── Case 2: Power dropped below 10W ────────────────────
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.to_state.state | float(0) < 10 }}
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.espresso_ready
+mode: single
