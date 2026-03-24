@@ -1,40 +1,98 @@
-alias: Power Monitor - Espresso Ready
-description: >
-  Turns on an input_boolean after power has been continuously at or above 10W
-  for 10 minutes. Turns it off when power drops below 10W.
-triggers:
+# ============================================================
+# Power Monitor — Sustained Threshold Tracker
+# ============================================================
+# Watches a power sensor and flips an input_boolean on after
+# power has been continuously at or above a threshold for a
+# set duration. Turns the boolean off immediately when power
+# drops below the threshold.
+#
+# Use case: detect when an appliance has finished its startup
+# cycle or reached a steady "running" draw — e.g. espresso
+# machine boiler heated, dryer finished warming up, etc.
+# ============================================================
+
+blueprint:
+  name: Power Monitor - Sustained Threshold Tracker
+  description: >
+    Turns on an input_boolean after power has been continuously
+    at or above a threshold for a set duration. Turns it off
+    immediately when power drops below the threshold.
+  domain: automation
+
+  input:
+    power_sensor:
+      name: Power Sensor
+      description: The sensor that reports power draw in watts.
+      selector:
+        entity:
+          domain: sensor
+    threshold:
+      name: Power Threshold (W)
+      description: Power must be at or above this value to start the timer.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 1
+          unit_of_measurement: W
+    duration_minutes:
+      name: Duration (minutes)
+      description: How long power must stay at or above the threshold before triggering.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: min
+    target_boolean:
+      name: Target Boolean
+      description: The input_boolean to turn on/off.
+      selector:
+        entity:
+          domain: input_boolean
+
+trigger:
   - trigger: state
-    entity_id: sensor.smart_plug_v2_89b92a_power
-    # Fires on every power state change
+    entity_id: !input power_sensor
+    variables:
+      threshold: !input threshold
+      duration_minutes: !input duration_minutes
+      power_sensor: !input power_sensor
+      target_boolean: !input target_boolean
+
 conditions: []
+
 actions:
+
+  # Case 1: Power crossed ABOVE or STAYED above threshold.
+  # If power drops below during the wait, Case 2 catches it and
+  # the re-check condition at the end prevents a false trigger.
   - choose:
-      # ── Case 1: Power just crossed ABOVE 10W ────────────────
       - conditions:
           - condition: template
             value_template: >
-              {{ trigger.to_state.state | float(0) >= 10 }}
+              {{ trigger.to_state.state | float(0) >= threshold }}
         sequence:
-          # Start the 10-minute wait. If power drops below 10W during
-          # this window, the restart automation (Case 2) handles it.
           - delay:
-              minutes: 10
-          # After waiting, re-check that power is still >= 10W.
-          # If it dropped during the delay, do nothing.
+              minutes: "{{ duration_minutes }}"
           - condition: template
             value_template: >
-              {{ states('sensor.smart_plug_v2_89b92a_power') | float(0) >= 10 }}
+              {{ states(power_sensor) | float(0) >= threshold }}
           - action: input_boolean.turn_on
             target:
-              entity_id: input_boolean.espresso_ready
+              entity_id: "{{ target_boolean }}"
 
-      # ── Case 2: Power dropped below 10W ────────────────────
+      # Case 2: Power dropped BELOW threshold.
+      # Turns off the boolean immediately.
       - conditions:
           - condition: template
             value_template: >
-              {{ trigger.to_state.state | float(0) < 10 }}
+              {{ trigger.to_state.state | float(0) < threshold }}
         sequence:
           - action: input_boolean.turn_off
             target:
-              entity_id: input_boolean.espresso_ready
+              entity_id: "{{ target_boolean }}"
+
 mode: single
