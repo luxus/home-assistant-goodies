@@ -53,6 +53,10 @@ blueprint:
         entity:
           domain: input_boolean
 
+# The instance name — shown in the automation list after import.
+# Uses a template so the user sees a meaningful default they can override.
+name: "{{ 'Power Monitor - ' ~ state_attr(!input target_boolean, 'friendly_name') or 'Sustained Threshold Tracker' }}"
+
 trigger:
   - trigger: state
     entity_id: !input power_sensor
@@ -61,6 +65,8 @@ trigger:
       duration_minutes: !input duration_minutes
       power_sensor: !input power_sensor
       target_boolean: !input target_boolean
+
+mode: single
 
 conditions: []
 
