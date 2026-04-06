@@ -103,13 +103,6 @@ blueprint:
           domain: tts
 
 # ── Trigger ───────────────────────────────────────────────────
-# Fires whenever the chosen entity transitions to the 'on' state.
-trigger:
-  - trigger: state
-    entity_id: !input trigger_entity
-    to: "on"
-
-# ── Trigger ───────────────────────────────────────────────────
 # Fires when the entity has been continuously 'on' for the configured duration.
 trigger:
   - trigger: state
