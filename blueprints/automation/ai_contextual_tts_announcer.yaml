@@ -75,9 +75,39 @@ blueprint:
       name: AI Prompt
       description: >
         Instructions for the AI. Tell it what kind of message to write
-        and any relevant context. The output must be plain spoken text
-        with no quotes, markdown, or formatting — it goes straight to TTS.
-      default: "Write a short, friendly announcement. Output only the raw spoken text."
+        and any relevant context. The TTS instructions below are automatically
+        prepended to your prompt. Output must be plain spoken text with no
+        quotes, markdown, or formatting — it goes straight to TTS.
+      default: "Write a short, friendly announcement about the event."
+      selector:
+        text:
+          multiline: true
+
+    ai_tts_instructions:
+      name: TTS Speech Instructions (Optional)
+      description: >
+        Instructions for speech tags and formatting for xAI/ElevenLabs TTS.
+        These are automatically prepended to your prompt. Edit to customize,
+        or clear to disable speech tags entirely.
+      default: >
+        You are generating text for xAI Text-to-Speech (TTS) API.
+        The TTS supports expressive speech tags for natural delivery:
+        
+        Inline tags (place at specific points): [pause], [long-pause], [laugh],
+        [chuckle], [giggle], [cry], [tsk], [tongue-click], [lip-smack], [breath],
+        [inhale], [exhale], [sigh], [hum-tune]
+        
+        Wrapping tags (wrap text sections): <soft>text</soft>, <whisper>text</whisper>,
+        <loud>text</loud>, <build-intensity>text</build-intensity>,
+        <decrease-intensity>text</decrease-intensity>, <higher-pitch>text</higher-pitch>,
+        <lower-pitch>text</lower-pitch>, <slow>text</slow>, <fast>text</fast>,
+        <sing-song>text</sing-song>, <singing>text</singing>,
+        <laugh-speak>text</laugh-speak>, <emphasis>text</emphasis>
+        
+        IMPORTANT: Respond ONLY with the raw spoken text including any speech tags.
+        No markdown, no quotes, no formatting, no explanations—just the plain text.
+        
+        Now write the announcement:
       selector:
         text:
           multiline: true
@@ -130,10 +160,17 @@ actions:
   # 1. Generate the announcement text via AI.
   #    The response is stored in `generated_text`.
   #    Access the output string via `generated_text.data`.
+  - variables:
+      tts_instructions: !input ai_tts_instructions
+      user_prompt: !input ai_prompt
+      full_prompt: >-
+        {{ tts_instructions }}
+        
+        {{ user_prompt }}
   - action: ai_task.generate_data
     data:
       task_name: "blueprint generated announcement"
-      instructions: !input ai_prompt
+      instructions: "{{ full_prompt }}"
       entity_id: !input ai_model
     response_variable: generated_text
 
