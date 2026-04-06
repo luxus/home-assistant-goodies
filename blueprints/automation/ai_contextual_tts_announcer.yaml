@@ -76,21 +76,19 @@ blueprint:
         text:
           multiline: true
 
-    # ── Delay ─────────────────────────────────────────────────
-    duration_minutes:
+    # ── Duration ──────────────────────────────────────────────
+    duration_required:
       name: Duration Required
       description: >
-        Only trigger when the entity has been "on" for this many minutes.
+        Only trigger when the entity has been "on" for this duration.
         Useful for sustained state announcements (e.g., announce only
         after the coffee machine has been on for 10 minutes).
-      default: 0
+      default:
+        hours: 0
+        minutes: 0
+        seconds: 0
       selector:
-        number:
-          min: 0
-          max: 60
-          step: 1
-          mode: slider
-          unit_of_measurement: minutes
+        duration:
 
     # ── TTS ───────────────────────────────────────────────────
     tts_service:
@@ -108,8 +106,7 @@ trigger:
   - trigger: state
     entity_id: !input trigger_entity
     to: "on"
-    for:
-      minutes: !input duration_minutes
+    for: !input duration_required
 
 # ── Actions ───────────────────────────────────────────────────
 actions:
