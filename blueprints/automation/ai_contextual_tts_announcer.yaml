@@ -10,11 +10,15 @@
 # pauses playback, delivers the announcement, then restores
 # everything automatically.
 #
+# NEW: Voice profile support for xAI/ElevenLabs Custom TTS!
+# Leave voice_profile empty to use default behavior (media-source),
+# or enter a profile name to use tts.speak with voice_profile option.
+#
 # Requirements:
 #   - Home Assistant 2024.6+ (ai_task domain support)
 #   - An AI Task integration (e.g. OpenAI, Google Generative AI,
 #     Nvidia NIM, etc.) configured in HA
-#   - A TTS integration (e.g. ElevenLabs, Piper, Google Cloud TTS)
+#   - A TTS integration (e.g. xAI Custom TTS, ElevenLabs Custom TTS, Piper)
 #   - A media_player entity (HomePod, Sonos, Chromecast, etc.)
 # ============================================================
 
@@ -24,6 +28,8 @@ blueprint:
     Generates an AI-written message and plays it on a media player
     with safe volume ducking and full queue restoration.
     Perfect for HomePods and other picky speakers.
+    
+    NEW: Optional voice profile support for xAI/ElevenLabs Custom TTS!
   domain: automation
 
   input:
@@ -100,6 +106,16 @@ blueprint:
         entity:
           domain: tts
 
+    voice_profile:
+      name: Voice Profile (Optional)
+      description: >
+        Voice profile name for xAI/ElevenLabs Custom TTS (e.g., "Morning News").
+        Leave empty for default TTS behavior.
+      default: ""
+      selector:
+        text:
+          multiline: false
+
 # ── Trigger ───────────────────────────────────────────────────
 # Fires when the entity has been continuously 'on' for the configured duration.
 trigger:
@@ -128,6 +144,7 @@ actions:
   - variables:
       speaker_var: !input target_speaker
       tts_var: !input tts_service
+      voice_profile_var: !input voice_profile
       old_volume: "{{ state_attr(speaker_var, 'volume_level') | float(0.5) }}"
       was_playing: "{{ is_state(speaker_var, 'playing') }}"
 
@@ -162,16 +179,34 @@ actions:
       volume_level: !input announcement_volume
 
   # 6. Play the AI-generated text via TTS.
-  #    The media-source URI tells HA to render the message
-  #    through the chosen TTS engine before sending to the speaker.
-  - action: media_player.play_media
-    target:
-      entity_id: "{{ speaker_var }}"
-    data:
-      media:
-        media_content_type: music
-        media_content_id: >-
-          media-source://tts/{{ tts_var }}?message={{ generated_text.data | urlencode }}
+  #    Uses media-source method by default, or tts.speak with voice_profile if specified.
+  - choose:
+      # If voice profile is specified, use tts.speak with options
+      - conditions:
+          - condition: template
+            value_template: "{{ voice_profile_var | length > 0 }}"
+        sequence:
+          - action: tts.speak
+            target:
+              entity_id: "{{ tts_var }}"
+            data:
+              media_player_entity_id: "{{ speaker_var }}"
+              message: "{{ generated_text.data }}"
+              options:
+                voice_profile: "{{ voice_profile_var }}"
+      # If no voice profile, use original media-source method
+      - conditions:
+          - condition: template
+            value_template: "{{ voice_profile_var | length == 0 }}"
+        sequence:
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ speaker_var }}"
+            data:
+              media:
+                media_content_type: music
+                media_content_id: >-
+                  media-source://tts/{{ tts_var }}?message={{ generated_text.data | urlencode }}
 
   # 7. Wait for the speaker to actually start playing
   #    (TTS rendering + network delivery can take a moment).
