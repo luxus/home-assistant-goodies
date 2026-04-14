@@ -172,6 +172,24 @@ triggers:
     options:
       behavior: last
 
+  - trigger: light.turned_on
+    id: light_changed
+    target: !input light_target
+    options:
+      behavior: any
+
+  - trigger: light.turned_off
+    id: light_changed
+    target: !input light_target
+    options:
+      behavior: any
+
+  - trigger: light.brightness_changed
+    id: light_changed
+    target: !input light_target
+    options:
+      behavior: any
+
 variables:
   sensor_target: !input sensor_target
   light_target: !input light_target
@@ -180,6 +198,8 @@ variables:
   motion_on_action: !input motion_on_action
   snapshot_scene_id: "{{ (this.entity_id ~ '_motion_restore') | slugify }}"
   snapshot_scene_entity: "{{ 'scene.' ~ snapshot_scene_id }}"
+  manual_override_scene_id: "{{ (this.entity_id ~ '_motion_manual_override') | slugify }}"
+  manual_override_scene_entity: "{{ 'scene.' ~ manual_override_scene_id }}"
   sensor_entities_json: >
     {% set entity_ids = sensor_target.get('entity_id', []) %}
     {% set entity_ids = entity_ids if entity_ids is list else ([entity_ids] if entity_ids else []) %}
@@ -254,6 +274,11 @@ actions:
             condition: template
             value_template: "{{ light_entities_json | count > 0 }}"
 
+          - alias: Ignore motion re-triggers while manual override is active
+            condition: template
+            value_template: >
+              {{ states(manual_override_scene_entity) in ['unknown', 'unavailable'] }}
+
           - alias: Optional illuminance gate for new cycles
             condition: template
             value_template: >
@@ -293,6 +318,29 @@ actions:
                 target: !input light_target
                 data:
                   transition: !input turn_on_transition
+
+      # A manual/external light change happened while a restore snapshot existed.
+      - conditions:
+          - condition: trigger
+            id: light_changed
+        sequence:
+          - alias: Detect manual override only while restore is pending
+            condition: template
+            value_template: >
+              {{ states(snapshot_scene_entity) not in ['unknown', 'unavailable']
+                 and trigger.to_state is not none
+                 and trigger.to_state.context.parent_id is none }}
+
+          - alias: Cancel pending restore snapshot
+            action: scene.delete
+            target:
+              entity_id: "{{ snapshot_scene_entity }}"
+
+          - alias: Mark manual override as active for this motion cycle
+            action: scene.create
+            data:
+              scene_id: "{{ manual_override_scene_id }}"
+              snapshot_entities: "{{ light_entities_json }}"
 
       # The last relevant motion or occupancy sensor cleared.
       - conditions:
@@ -353,6 +401,17 @@ actions:
                   - action: scene.delete
                     target:
                       entity_id: "{{ snapshot_scene_entity }}"
+
+          - alias: Clear manual override marker
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(manual_override_scene_entity) not in ['unknown', 'unavailable'] }}
+                sequence:
+                  - action: scene.delete
+                    target:
+                      entity_id: "{{ manual_override_scene_entity }}"
 
 mode: restart
 max_exceeded: silent

@@ -18,6 +18,7 @@ Experimental variant that uses Home Assistant Labs purpose-specific triggers and
 - uses the newer **target-first** model for motion/occupancy sensors
 - supports sensor and light **entities, devices, and areas**
 - keeps the same **scene snapshot + restore** behavior
+- manual light changes during an active motion cycle cancel the later restore for that cycle
 - best fit if you actively use new Home Assistant automation features
 
 #### Requirements
