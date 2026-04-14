@@ -207,7 +207,7 @@ variables:
         {% endif %}
       {% endfor %}
     {% endfor %}
-    {{ ns.entities | to_json }}
+    {{ ns.entities }}
   light_entities_json: >
     {% set entity_ids = light_target.get('entity_id', []) %}
     {% set entity_ids = entity_ids if entity_ids is list else ([entity_ids] if entity_ids else []) %}
@@ -235,7 +235,7 @@ variables:
         {% endif %}
       {% endfor %}
     {% endfor %}
-    {{ ns.entities | to_json }}
+    {{ ns.entities }}
 
 conditions: []
 
@@ -248,11 +248,11 @@ actions:
         sequence:
           - alias: Confirm at least one watched sensor is available
             condition: template
-            value_template: "{{ sensor_entities_json | from_json | count > 0 }}"
+            value_template: "{{ sensor_entities_json | count > 0 }}"
 
           - alias: Confirm at least one light is available
             condition: template
-            value_template: "{{ light_entities_json | from_json | count > 0 }}"
+            value_template: "{{ light_entities_json | count > 0 }}"
 
           - alias: Optional illuminance gate for new cycles
             condition: template
@@ -280,7 +280,7 @@ actions:
                   - action: scene.create
                     data:
                       scene_id: "{{ snapshot_scene_id }}"
-                      snapshot_entities: "{{ light_entities_json | from_json }}"
+                      snapshot_entities: "{{ light_entities_json }}"
 
           - alias: Activate motion lighting
             choose:
@@ -308,7 +308,7 @@ actions:
                   - condition: template
                     value_template: >
                       {% set ns = namespace(count=0) %}
-                      {% for entity_id in sensor_entities_json | from_json %}
+                      {% for entity_id in sensor_entities_json %}
                         {% if state_attr(entity_id, 'device_class') == 'motion' %}
                           {% set ns.count = ns.count + 1 %}
                         {% endif %}
@@ -326,7 +326,7 @@ actions:
                   - condition: template
                     value_template: >
                       {% set ns = namespace(count=0) %}
-                      {% for entity_id in sensor_entities_json | from_json %}
+                      {% for entity_id in sensor_entities_json %}
                         {% if state_attr(entity_id, 'device_class') == 'occupancy' %}
                           {% set ns.count = ns.count + 1 %}
                         {% endif %}

@@ -218,7 +218,7 @@ variables:
         {% endif %}
       {% endfor %}
     {% endfor %}
-    {{ ns.entities | to_json }}
+    {{ ns.entities }}
   light_entities_json: >
     {% set entity_ids = light_target.get('entity_id', []) %}
     {% set entity_ids = entity_ids if entity_ids is list else ([entity_ids] if entity_ids else []) %}
@@ -246,7 +246,7 @@ variables:
         {% endif %}
       {% endfor %}
     {% endfor %}
-    {{ ns.entities | to_json }}
+    {{ ns.entities }}
 
 conditions: []
 
@@ -255,12 +255,12 @@ actions:
   # Fail fast if neither explicit sensors nor motion areas resolve to anything.
   - alias: Confirm at least one motion sensor is available
     condition: template
-    value_template: "{{ motion_sensor_entities_json | from_json | count > 0 }}"
+    value_template: "{{ motion_sensor_entities_json | count > 0 }}"
 
   # Fail fast if the selected light target resolves to no actual light entities.
   - alias: Confirm at least one light is available
     condition: template
-    value_template: "{{ light_entities_json | from_json | count > 0 }}"
+    value_template: "{{ light_entities_json | count > 0 }}"
 
   # Only apply the lux threshold when starting a brand-new motion cycle.
   # If a snapshot already exists, we are in an active cycle and should keep
@@ -297,7 +297,7 @@ actions:
           - action: scene.create
             data:
               scene_id: "{{ snapshot_scene_id }}"
-              snapshot_entities: "{{ light_entities_json | from_json }}"
+              snapshot_entities: "{{ light_entities_json }}"
 
   # If a custom action is provided, run it.
   # Otherwise, just turn on the selected light target.
@@ -317,7 +317,7 @@ actions:
   - alias: Wait for all motion sensors to clear
     wait_template: >
       {% set active = namespace(any_on=false) %}
-      {% for entity_id in motion_sensor_entities_json | from_json %}
+      {% for entity_id in motion_sensor_entities_json %}
         {% if is_state(entity_id, 'on') %}
           {% set active.any_on = true %}
         {% endif %}
@@ -333,7 +333,7 @@ actions:
     condition: template
     value_template: >
       {% set active = namespace(any_on=false) %}
-      {% for entity_id in motion_sensor_entities_json | from_json %}
+      {% for entity_id in motion_sensor_entities_json %}
         {% if is_state(entity_id, 'on') %}
           {% set active.any_on = true %}
         {% endif %}
