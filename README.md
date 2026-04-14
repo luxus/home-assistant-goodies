@@ -6,6 +6,68 @@ A collection of Home Assistant blueprints and automations.
 
 ## Blueprints
 
+### Motion Light - Scene Restore (Labs)
+
+Experimental variant that uses Home Assistant Labs purpose-specific triggers and conditions. This is the version to try if you want the newer target-first automation style with areas/devices/entities directly in the trigger layer.
+
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fluxus%2Fhome-assistant-goodies%2Fmain%2Fblueprints%2Fautomation%2Fmotion_light_scene_restore_labs.yaml)
+
+#### Why you probably want this one
+
+- uses **purpose-specific triggers/conditions** from Home Assistant Labs
+- uses the newer **target-first** model for motion/occupancy sensors
+- supports sensor and light **entities, devices, and areas**
+- keeps the same **scene snapshot + restore** behavior
+- best fit if you actively use new Home Assistant automation features
+
+#### Requirements
+
+- **Home Assistant 2025.12+**
+- **Home Assistant Labs → purpose-specific triggers and conditions** enabled
+
+#### Quick Labs test / import checklist
+
+1. Enable **Settings → System → Labs → purpose-specific triggers and conditions**
+2. Import the Labs blueprint
+3. Create an automation from it
+4. Pick a motion/occupancy target and a light target
+5. Trigger it once and verify a temporary scene snapshot is created/restored correctly
+6. Test again while moving continuously to confirm it does not restore too early
+7. If needed, increase `No-motion wait` or add a lux/start condition
+
+#### Recommended starter setup
+
+A good first configuration for a hallway or bathroom looks like this:
+
+- **Motion / occupancy target:** select the room/area you want to monitor
+- **Lights to snapshot and restore:** select the same room/area as a light target
+- **No-motion wait:** `2 minutes`
+- **Start conditions:** add a sun or time condition if you want it only at night
+- **Illuminance sensor:** select your lux sensor if available
+- **Illuminance threshold:** start with `50 lx`
+- **Motion-on action:** leave empty for a plain `light.turn_on`, or use a custom `scene.turn_on` action if you want a specific motion scene
+
+#### Labs vs stable version
+
+| Version | Best for | Trigger model | Recommendation |
+|---|---|---|---|
+| `motion_light_scene_restore_labs.yaml` | modern HA setups with Labs enabled | purpose-specific `motion.*` / `occupancy.*` triggers | **recommended first** |
+| `motion_light_scene_restore.yaml` | maximum compatibility / sharing with non-Labs users | classic YAML + template logic | fallback / compatibility option |
+
+### Motion Light - Scene Restore
+
+Stable compatibility version using classic YAML trigger logic. It keeps the same snapshot/restore behavior, but does not depend on Home Assistant Labs. Use this if you want the broadest compatibility or if Labs is disabled.
+
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fluxus%2Fhome-assistant-goodies%2Fmain%2Fblueprints%2Fautomation%2Fmotion_light_scene_restore.yaml)
+
+#### Stable version highlights
+
+- watches one or more motion/occupancy sensors
+- supports motion-area style selection
+- supports optional lux and start conditions
+- snapshots and restores the exact previous light state
+- intended mainly as the compatibility/fallback version now
+
 ### AI Contextual TTS Announcer (HomePod Safe)
 
 Generates an AI-written announcement and plays it on a media player with full volume ducking and queue restoration. Designed to be safe for HomePods and other picky speakers.

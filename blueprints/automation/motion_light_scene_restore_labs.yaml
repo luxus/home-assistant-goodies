@@ -1,0 +1,358 @@
+# ============================================================
+# Motion Light - Scene Restore (Labs)
+# ============================================================
+# Experimental variant using Home Assistant Labs purpose-specific
+# triggers and conditions.
+#
+# Requirements:
+#   - Home Assistant 2025.12+
+#   - Home Assistant Labs: purpose-specific triggers and conditions enabled
+#
+# This version uses the newer target-first automation model for
+# motion/occupancy detection, while still preserving the same
+# scene snapshot + restore behavior.
+# ============================================================
+
+blueprint:
+  name: Motion Light - Scene Restore (Labs)
+  description: >
+    Experimental motion light blueprint built on Home Assistant Labs
+    purpose-specific triggers and conditions. Turns lights on when motion or
+    occupancy is detected and restores their exact previous state after the
+    area is clear for the configured timeout.
+
+    Requires Home Assistant Labs preview feature "purpose-specific triggers and
+    conditions" to be enabled.
+  domain: automation
+  author: Luxus
+  source_url: https://github.com/luxus/home-assistant-goodies/blob/main/blueprints/automation/motion_light_scene_restore_labs.yaml
+  homeassistant:
+    min_version: 2025.12.0
+
+  input:
+    trigger_section:
+      name: Trigger
+      icon: mdi:motion-sensor
+      input:
+        sensor_target:
+          name: Motion / occupancy target
+          description: >
+            Select the motion or occupancy sensors to watch. You can target
+            entities, devices, or entire areas.
+          selector:
+            target:
+              entity:
+                - domain: binary_sensor
+                  device_class: motion
+                - domain: binary_sensor
+                  device_class: occupancy
+
+        no_motion_wait:
+          name: No-motion wait
+          description: >
+            How long the area must remain clear before the previous light state
+            is restored.
+          default:
+            minutes: 2
+          selector:
+            duration:
+
+        start_conditions:
+          name: Start conditions (optional)
+          description: >
+            Extra conditions required to start a new motion cycle. Use this for
+            time windows, only-at-night rules, occupancy checks, and similar
+            constraints.
+          default: []
+          selector:
+            condition:
+
+    light_section:
+      name: Lights
+      icon: mdi:lightbulb-group
+      input:
+        light_target:
+          name: Lights to snapshot and restore
+          description: >
+            Select the lights affected by this blueprint. This target is used
+            for snapshot/restore and for the default light.turn_on action. You
+            can select entities, devices, or entire areas.
+          selector:
+            target:
+              entity:
+                - domain: light
+
+        motion_on_action:
+          name: Motion-on action (optional)
+          description: >
+            Optional custom action to run when motion starts. Leave empty to use
+            a simple light.turn_on on the selected light target. If you use a
+            custom action, make sure it affects the same lights selected above.
+          default: []
+          selector:
+            action:
+
+    options_section:
+      name: Options
+      icon: mdi:cog
+      collapsed: true
+      input:
+        illuminance_sensor:
+          name: Illuminance sensor (optional)
+          description: >
+            If set, the automation only starts a new motion cycle when the lux
+            value is at or below the threshold below.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: illuminance
+
+        illuminance_below:
+          name: Illuminance threshold
+          description: Only used if an illuminance sensor is selected.
+          default: 50
+          selector:
+            number:
+              min: 0
+              max: 2000
+              step: 1
+              unit_of_measurement: lx
+              mode: box
+
+        turn_on_transition:
+          name: Default turn-on transition
+          description: >
+            Transition used only when the custom motion-on action is left empty.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              unit_of_measurement: s
+              mode: slider
+
+        restore_transition:
+          name: Restore transition
+          description: >
+            Transition used when restoring the snapshotted light state.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              unit_of_measurement: s
+              mode: slider
+
+triggers:
+  - trigger: motion.detected
+    id: detected
+    target: !input sensor_target
+    options:
+      behavior: any
+
+  - trigger: occupancy.detected
+    id: detected
+    target: !input sensor_target
+    options:
+      behavior: any
+
+  - trigger: motion.cleared
+    id: cleared
+    target: !input sensor_target
+    options:
+      behavior: last
+
+  - trigger: occupancy.cleared
+    id: cleared
+    target: !input sensor_target
+    options:
+      behavior: last
+
+variables:
+  sensor_target: !input sensor_target
+  light_target: !input light_target
+  illuminance_sensor: !input illuminance_sensor
+  illuminance_below: !input illuminance_below
+  motion_on_action: !input motion_on_action
+  snapshot_scene_id: "{{ (this.entity_id ~ '_motion_restore') | slugify }}"
+  snapshot_scene_entity: "{{ 'scene.' ~ snapshot_scene_id }}"
+  sensor_entities_json: >
+    {% set entity_ids = sensor_target.get('entity_id', []) %}
+    {% set entity_ids = entity_ids if entity_ids is list else ([entity_ids] if entity_ids else []) %}
+    {% set device_ids = sensor_target.get('device_id', []) %}
+    {% set device_ids = device_ids if device_ids is list else ([device_ids] if device_ids else []) %}
+    {% set area_ids = sensor_target.get('area_id', []) %}
+    {% set area_ids = area_ids if area_ids is list else ([area_ids] if area_ids else []) %}
+    {% set ns = namespace(entities=[]) %}
+    {% for entity_id in entity_ids %}
+      {% if entity_id.startswith('binary_sensor.') and state_attr(entity_id, 'device_class') in ['motion', 'occupancy'] and entity_id not in ns.entities %}
+        {% set ns.entities = ns.entities + [entity_id] %}
+      {% endif %}
+    {% endfor %}
+    {% for device_id in device_ids %}
+      {% for entity_id in device_entities(device_id) %}
+        {% if entity_id.startswith('binary_sensor.') and state_attr(entity_id, 'device_class') in ['motion', 'occupancy'] and entity_id not in ns.entities %}
+          {% set ns.entities = ns.entities + [entity_id] %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {% for area_id in area_ids %}
+      {% for entity_id in area_entities(area_id) %}
+        {% if entity_id.startswith('binary_sensor.') and state_attr(entity_id, 'device_class') in ['motion', 'occupancy'] and entity_id not in ns.entities %}
+          {% set ns.entities = ns.entities + [entity_id] %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {{ ns.entities | to_json }}
+  light_entities_json: >
+    {% set entity_ids = light_target.get('entity_id', []) %}
+    {% set entity_ids = entity_ids if entity_ids is list else ([entity_ids] if entity_ids else []) %}
+    {% set device_ids = light_target.get('device_id', []) %}
+    {% set device_ids = device_ids if device_ids is list else ([device_ids] if device_ids else []) %}
+    {% set area_ids = light_target.get('area_id', []) %}
+    {% set area_ids = area_ids if area_ids is list else ([area_ids] if area_ids else []) %}
+    {% set ns = namespace(entities=[]) %}
+    {% for entity_id in entity_ids %}
+      {% if entity_id.startswith('light.') and entity_id not in ns.entities %}
+        {% set ns.entities = ns.entities + [entity_id] %}
+      {% endif %}
+    {% endfor %}
+    {% for device_id in device_ids %}
+      {% for entity_id in device_entities(device_id) %}
+        {% if entity_id.startswith('light.') and entity_id not in ns.entities %}
+          {% set ns.entities = ns.entities + [entity_id] %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {% for area_id in area_ids %}
+      {% for entity_id in area_entities(area_id) %}
+        {% if entity_id.startswith('light.') and entity_id not in ns.entities %}
+          {% set ns.entities = ns.entities + [entity_id] %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {{ ns.entities | to_json }}
+
+conditions: []
+
+actions:
+  - choose:
+      # Motion or occupancy was detected.
+      - conditions:
+          - condition: trigger
+            id: detected
+        sequence:
+          - alias: Confirm at least one watched sensor is available
+            condition: template
+            value_template: "{{ sensor_entities_json | from_json | count > 0 }}"
+
+          - alias: Confirm at least one light is available
+            condition: template
+            value_template: "{{ light_entities_json | from_json | count > 0 }}"
+
+          - alias: Optional illuminance gate for new cycles
+            condition: template
+            value_template: >
+              {{ states(snapshot_scene_entity) not in ['unknown', 'unavailable']
+                 or illuminance_sensor | length == 0
+                 or states(illuminance_sensor) | float(999999) <= illuminance_below | float(50) }}
+
+          - alias: Optional start conditions for new cycles
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(snapshot_scene_entity) in ['unknown', 'unavailable'] }}
+                sequence:
+                  - condition: !input start_conditions
+
+          - alias: Snapshot lights before motion lighting starts
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(snapshot_scene_entity) in ['unknown', 'unavailable'] }}
+                sequence:
+                  - action: scene.create
+                    data:
+                      scene_id: "{{ snapshot_scene_id }}"
+                      snapshot_entities: "{{ light_entities_json | from_json }}"
+
+          - alias: Activate motion lighting
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ motion_on_action | count > 0 }}"
+                sequence: !input motion_on_action
+            default:
+              - action: light.turn_on
+                target: !input light_target
+                data:
+                  transition: !input turn_on_transition
+
+      # The last relevant motion or occupancy sensor cleared.
+      - conditions:
+          - condition: trigger
+            id: cleared
+        sequence:
+          - alias: Wait for the no-motion timeout
+            delay: !input no_motion_wait
+
+          - alias: Confirm all motion sensors are still clear
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {% set ns = namespace(count=0) %}
+                      {% for entity_id in sensor_entities_json | from_json %}
+                        {% if state_attr(entity_id, 'device_class') == 'motion' %}
+                          {% set ns.count = ns.count + 1 %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.count > 0 }}
+                sequence:
+                  - condition: motion.is_not_detected
+                    target: !input sensor_target
+                    options:
+                      behavior: all
+
+          - alias: Confirm all occupancy sensors are still clear
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {% set ns = namespace(count=0) %}
+                      {% for entity_id in sensor_entities_json | from_json %}
+                        {% if state_attr(entity_id, 'device_class') == 'occupancy' %}
+                          {% set ns.count = ns.count + 1 %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.count > 0 }}
+                sequence:
+                  - condition: occupancy.is_not_detected
+                    target: !input sensor_target
+                    options:
+                      behavior: all
+
+          - alias: Restore previous light state
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(snapshot_scene_entity) not in ['unknown', 'unavailable'] }}
+                sequence:
+                  - action: scene.turn_on
+                    target:
+                      entity_id: "{{ snapshot_scene_entity }}"
+                    data:
+                      transition: !input restore_transition
+                  - action: scene.delete
+                    target:
+                      entity_id: "{{ snapshot_scene_entity }}"
+
+mode: restart
+max_exceeded: silent
