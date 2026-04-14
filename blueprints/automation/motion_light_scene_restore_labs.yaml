@@ -151,22 +151,26 @@ triggers:
   - trigger: motion.detected
     id: detected
     target: !input sensor_target
-    behavior: any
+    options:
+      behavior: any
 
   - trigger: occupancy.detected
     id: detected
     target: !input sensor_target
-    behavior: any
+    options:
+      behavior: any
 
   - trigger: motion.cleared
     id: cleared
     target: !input sensor_target
-    behavior: last
+    options:
+      behavior: last
 
   - trigger: occupancy.cleared
     id: cleared
     target: !input sensor_target
-    behavior: last
+    options:
+      behavior: last
 
   - trigger: event
     id: light_changed
@@ -335,39 +339,16 @@ actions:
           - alias: Wait for the no-motion timeout
             delay: !input no_motion_wait
 
-          - alias: Confirm all motion sensors are still clear
-            choose:
-              - conditions:
-                  - condition: template
-                    value_template: >
-                      {% set ns = namespace(count=0) %}
-                      {% for entity_id in sensor_entities_json %}
-                        {% if state_attr(entity_id, 'device_class') == 'motion' %}
-                          {% set ns.count = ns.count + 1 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.count > 0 }}
-                sequence:
-                  - condition: motion.is_not_detected
-                    target: !input sensor_target
-                    behavior: all
-
-          - alias: Confirm all occupancy sensors are still clear
-            choose:
-              - conditions:
-                  - condition: template
-                    value_template: >
-                      {% set ns = namespace(count=0) %}
-                      {% for entity_id in sensor_entities_json %}
-                        {% if state_attr(entity_id, 'device_class') == 'occupancy' %}
-                          {% set ns.count = ns.count + 1 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ ns.count > 0 }}
-                sequence:
-                  - condition: occupancy.is_not_detected
-                    target: !input sensor_target
-                    behavior: all
+          - alias: Confirm all watched sensors are still clear
+            condition: template
+            value_template: >
+              {% set active = namespace(any_on=false) %}
+              {% for entity_id in sensor_entities_json %}
+                {% if is_state(entity_id, 'on') %}
+                  {% set active.any_on = true %}
+                {% endif %}
+              {% endfor %}
+              {{ not active.any_on }}
 
           - alias: Restore previous light state
             choose:
