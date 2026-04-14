@@ -151,44 +151,26 @@ triggers:
   - trigger: motion.detected
     id: detected
     target: !input sensor_target
-    options:
-      behavior: any
+    behavior: any
 
   - trigger: occupancy.detected
     id: detected
     target: !input sensor_target
-    options:
-      behavior: any
+    behavior: any
 
   - trigger: motion.cleared
     id: cleared
     target: !input sensor_target
-    options:
-      behavior: last
+    behavior: last
 
   - trigger: occupancy.cleared
     id: cleared
     target: !input sensor_target
-    options:
-      behavior: last
+    behavior: last
 
-  - trigger: light.turned_on
+  - trigger: event
     id: light_changed
-    target: !input light_target
-    options:
-      behavior: any
-
-  - trigger: light.turned_off
-    id: light_changed
-    target: !input light_target
-    options:
-      behavior: any
-
-  - trigger: light.brightness_changed
-    id: light_changed
-    target: !input light_target
-    options:
-      behavior: any
+    event_type: state_changed
 
 variables:
   sensor_target: !input sensor_target
@@ -328,8 +310,11 @@ actions:
             condition: template
             value_template: >
               {{ states(snapshot_scene_entity) not in ['unknown', 'unavailable']
-                 and trigger.to_state is not none
-                 and trigger.to_state.context.parent_id is none }}
+                 and trigger.event is defined
+                 and trigger.event.data.entity_id is defined
+                 and trigger.event.data.entity_id in light_entities_json
+                 and trigger.event.data.new_state is not none
+                 and trigger.event.data.new_state.context.parent_id is none }}
 
           - alias: Cancel pending restore snapshot
             action: scene.delete
@@ -365,8 +350,7 @@ actions:
                 sequence:
                   - condition: motion.is_not_detected
                     target: !input sensor_target
-                    options:
-                      behavior: all
+                    behavior: all
 
           - alias: Confirm all occupancy sensors are still clear
             choose:
@@ -383,8 +367,7 @@ actions:
                 sequence:
                   - condition: occupancy.is_not_detected
                     target: !input sensor_target
-                    options:
-                      behavior: all
+                    behavior: all
 
           - alias: Restore previous light state
             choose:
