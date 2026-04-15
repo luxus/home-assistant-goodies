@@ -1,0 +1,308 @@
+# ============================================================
+# Motion Stateful Scene Switch
+# ============================================================
+# Drives a stateful scene switch from motion/occupancy sensors.
+#
+# Intended for integrations like Stateful Scene, where turning a
+# switch on activates a scene and turning it off restores the
+# previous state.
+#
+# To avoid accidentally turning off a switch that was already on
+# for some other reason, this blueprint creates a temporary marker
+# scene only when it actually turned the switch on itself. The
+# switch is turned off again only if that marker still exists.
+#
+# Optional manual-override handling can watch selected light
+# entities. If one of those lights changes externally while the
+# motion cycle is active, the ownership marker is deleted and the
+# automation stops trying to restore anything later.
+# ============================================================
+
+blueprint:
+  name: Motion Stateful Scene Switch
+  description: >
+    Turns a stateful scene switch on when motion is detected and turns it off
+    again after the area is clear for the configured timeout. Designed for
+    scene-switch integrations that restore the previous light state when the
+    switch turns off.
+  domain: automation
+  author: Luxus
+  source_url: https://github.com/luxus/home-assistant-goodies/blob/main/blueprints/automation/motion_stateful_scene_switch.yaml
+  homeassistant:
+    min_version: 2024.6.0
+
+  input:
+    trigger_section:
+      name: Trigger
+      icon: mdi:motion-sensor
+      input:
+        motion_sensors:
+          name: Motion Sensors
+          description: >
+            Select one or more individual motion or occupancy sensors. You can
+            leave this empty and use Motion Areas instead.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+                  device_class: motion
+                - domain: binary_sensor
+                  device_class: occupancy
+
+        motion_areas:
+          name: Motion Areas (optional)
+          description: >
+            Optional area-based selection. All motion and occupancy sensors in
+            the selected area(s) will be watched.
+          default: []
+          selector:
+            area:
+              multiple: true
+              entity:
+                - domain: binary_sensor
+                  device_class: motion
+                - domain: binary_sensor
+                  device_class: occupancy
+
+        no_motion_wait:
+          name: No-motion wait
+          description: >
+            How long all watched motion sensors must stay off before the
+            stateful scene switch is turned off again.
+          default:
+            minutes: 2
+          selector:
+            duration:
+
+        start_conditions:
+          name: Start conditions (optional)
+          description: >
+            Extra conditions required to start a new motion cycle. Use this for
+            time windows, only-at-night rules, occupancy checks, and similar
+            constraints.
+          default: []
+          selector:
+            condition:
+
+    switch_section:
+      name: Stateful Scene
+      icon: mdi:light-switch
+      input:
+        stateful_scene_switch:
+          name: Stateful Scene Switch
+          description: >
+            The switch entity that activates the scene when turned on and
+            restores the previous state when turned off.
+          selector:
+            entity:
+              domain: switch
+
+        manual_override_lights:
+          name: Manual override lights (optional)
+          description: >
+            Optional light entities to watch for manual changes. If one of these
+            lights changes while the motion cycle is active, the blueprint
+            forgets ownership and will no longer turn the stateful scene switch
+            off later in that cycle.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: light
+
+    options_section:
+      name: Options
+      icon: mdi:cog
+      collapsed: true
+      input:
+        illuminance_sensor:
+          name: Illuminance sensor (optional)
+          description: >
+            If set, the automation only starts a new motion cycle when the lux
+            value is at or below the threshold below.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: illuminance
+
+        illuminance_below:
+          name: Illuminance threshold
+          description: Only used if an illuminance sensor is selected.
+          default: 50
+          selector:
+            number:
+              min: 0
+              max: 2000
+              step: 1
+              unit_of_measurement: lx
+              mode: box
+
+trigger_variables:
+  motion_sensors_input: !input motion_sensors
+  motion_areas_input: !input motion_areas
+
+triggers:
+  - trigger: template
+    id: motion_detected
+    value_template: >
+      {% set explicit = motion_sensors_input if motion_sensors_input is list else ([motion_sensors_input] if motion_sensors_input else []) %}
+      {% set areas = motion_areas_input if motion_areas_input is list else ([motion_areas_input] if motion_areas_input else []) %}
+      {% set ns = namespace(entities=[]) %}
+      {% for entity_id in explicit %}
+        {% if entity_id not in ns.entities %}
+          {% set ns.entities = ns.entities + [entity_id] %}
+        {% endif %}
+      {% endfor %}
+      {% for area_id in areas %}
+        {% for entity_id in area_entities(area_id) %}
+          {% if entity_id.startswith('binary_sensor.') and state_attr(entity_id, 'device_class') in ['motion', 'occupancy'] and entity_id not in ns.entities %}
+            {% set ns.entities = ns.entities + [entity_id] %}
+          {% endif %}
+        {% endfor %}
+      {% endfor %}
+      {% set active = namespace(any_on=false) %}
+      {% for entity_id in ns.entities %}
+        {% if is_state(entity_id, 'on') %}
+          {% set active.any_on = true %}
+        {% endif %}
+      {% endfor %}
+      {{ active.any_on }}
+
+  - trigger: event
+    id: light_changed
+    event_type: state_changed
+
+variables:
+  motion_sensors: !input motion_sensors
+  motion_areas: !input motion_areas
+  stateful_scene_switch: !input stateful_scene_switch
+  manual_override_lights: !input manual_override_lights
+  illuminance_sensor: !input illuminance_sensor
+  illuminance_below: !input illuminance_below
+  marker_scene_id: "{{ (this.entity_id ~ '_stateful_scene_armed') | slugify }}"
+  marker_scene_entity: "{{ 'scene.' ~ marker_scene_id }}"
+  motion_sensor_entities: >
+    {% set explicit = motion_sensors if motion_sensors is list else ([motion_sensors] if motion_sensors else []) %}
+    {% set areas = motion_areas if motion_areas is list else ([motion_areas] if motion_areas else []) %}
+    {% set ns = namespace(entities=[]) %}
+    {% for entity_id in explicit %}
+      {% if entity_id not in ns.entities %}
+        {% set ns.entities = ns.entities + [entity_id] %}
+      {% endif %}
+    {% endfor %}
+    {% for area_id in areas %}
+      {% for entity_id in area_entities(area_id) %}
+        {% if entity_id.startswith('binary_sensor.') and state_attr(entity_id, 'device_class') in ['motion', 'occupancy'] and entity_id not in ns.entities %}
+          {% set ns.entities = ns.entities + [entity_id] %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {{ ns.entities }}
+
+conditions: []
+
+actions:
+  - choose:
+      # Manual light change while this automation owns the current cycle.
+      - conditions:
+          - condition: trigger
+            id: light_changed
+        sequence:
+          - alias: Forget ownership on manual light change
+            condition: template
+            value_template: >
+              {{ manual_override_lights | count > 0
+                 and states(marker_scene_entity) not in ['unknown', 'unavailable']
+                 and trigger.event is defined
+                 and trigger.event.data.entity_id is defined
+                 and trigger.event.data.entity_id in manual_override_lights
+                 and trigger.event.data.new_state is not none
+                 and trigger.event.data.new_state.context.parent_id is none }}
+          - action: scene.delete
+            target:
+              entity_id: "{{ marker_scene_entity }}"
+
+      # Normal motion-driven cycle.
+      - conditions:
+          - condition: trigger
+            id: motion_detected
+        sequence:
+          - alias: Confirm at least one motion sensor is available
+            condition: template
+            value_template: "{{ motion_sensor_entities | count > 0 }}"
+
+          # Only arm the stateful switch if it is currently off.
+          # This avoids taking ownership of a switch that was already on for
+          # some other reason.
+          - alias: Arm stateful scene switch if needed
+            choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input stateful_scene_switch
+                    state: "off"
+                sequence:
+                  - alias: Optional illuminance gate for new cycles
+                    condition: template
+                    value_template: >
+                      {{ illuminance_sensor | length == 0
+                         or states(illuminance_sensor) | float(999999) <= illuminance_below | float(50) }}
+                  - alias: Optional start conditions for new cycles
+                    condition: !input start_conditions
+                  - alias: Create ownership marker
+                    action: scene.create
+                    data:
+                      scene_id: "{{ marker_scene_id }}"
+                      snapshot_entities:
+                        - !input stateful_scene_switch
+                  - alias: Turn on the stateful scene switch
+                    action: switch.turn_on
+                    target:
+                      entity_id: !input stateful_scene_switch
+
+          - alias: Wait for all watched sensors to clear
+            wait_template: >
+              {% set active = namespace(any_on=false) %}
+              {% for entity_id in motion_sensor_entities %}
+                {% if is_state(entity_id, 'on') %}
+                  {% set active.any_on = true %}
+                {% endif %}
+              {% endfor %}
+              {{ not active.any_on }}
+
+          - alias: Wait for the no-motion timeout
+            delay: !input no_motion_wait
+
+          - alias: Confirm all watched sensors are still clear
+            condition: template
+            value_template: >
+              {% set active = namespace(any_on=false) %}
+              {% for entity_id in motion_sensor_entities %}
+                {% if is_state(entity_id, 'on') %}
+                  {% set active.any_on = true %}
+                {% endif %}
+              {% endfor %}
+              {{ not active.any_on }}
+
+          # Only turn the switch off if this automation previously turned it on
+          # and ownership was not cancelled by a manual light change.
+          - alias: Turn off the stateful scene switch if owned by this cycle
+            choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(marker_scene_entity) not in ['unknown', 'unavailable'] }}
+                sequence:
+                  - action: switch.turn_off
+                    target:
+                      entity_id: !input stateful_scene_switch
+                  - action: scene.delete
+                    target:
+                      entity_id: "{{ marker_scene_entity }}"
+
+mode: restart
+max_exceeded: silent
